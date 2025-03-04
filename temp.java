@@ -1,2 +1,19 @@
-az webapp show --name myWebApp --resource-group myResourceGroup --query "siteConfig.linuxFxVersion"
-az webapp config set --name myWebApp --resource-group myResourceGroup --linux-fx-version "DOCKER|myacr.azurecr.io/myapp:latest"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: my-app
+        image: <ACR_NAME>.azurecr.io/<YOUR_IMAGE>:latest  # Change this to your image
+        ports:
+        - containerPort: 80
