@@ -1,26 +1,22 @@
-replicaCount: 2
+controller:
+  service:
+    enabled: true
 
-image:
-  repository: myregistry.azurecr.io/my-springboot-app
-  tag: latest
-  pullPolicy: IfNotPresent
-
-service:
-  type: LoadBalancer
-  port: 8080
-
-env:
-  - name: SPRING_RABBITMQ_HOST
-    value: my-rabbitmq
-  - name: SPRING_RABBITMQ_PORT
-    value: "5672"
-  - name: SPRING_RABBITMQ_USERNAME
-    valueFrom:
-      secretKeyRef:
-        name: my-rabbitmq
-        key: rabbitmq-username
-  - name: SPRING_RABBITMQ_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        name: my-rabbitmq
-        key: rabbitmq-password
+ingress:
+  enabled: true
+  ingressClassName: nginx  # Ensure you have an Ingress Controller (e.g., NGINX)
+  hosts:
+    - host: my-app.example.com  # Change to your domain or external IP
+      paths:
+        - path: /api
+          pathType: Prefix
+          backend:
+            service:
+              name: spring-boot-service
+              port: 8080  # Port of your Spring Boot app
+        - path: /rabbitmq
+          pathType: Prefix
+          backend:
+            service:
+              name: rabbitmq-service
+              port: 15672  # RabbitMQ Management UI
