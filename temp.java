@@ -1,3 +1,7 @@
-kubectl exec -it <rabbitmq-pod> -- rabbitmqctl add_user <your-username> <your-password>
-kubectl exec -it <rabbitmq-pod> -- rabbitmqctl set_user_tags <your-username> administrator
-kubectl exec -it <rabbitmq-pod> -- rabbitmqctl set_permissions -p / <your-username> ".*" ".*" ".*"
+@Bean
+public FilterRegistrationBean<ForwardedHeaderFilter> forwardedHeaderFilter() {
+    FilterRegistrationBean<ForwardedHeaderFilter> filterRegBean = new FilterRegistrationBean<>();
+    filterRegBean.setFilter(new ForwardedHeaderFilter());
+    filterRegBean.setOrder(Ordered.HIGHEST_PRECEDENCE);
+    return filterRegBean;
+}
