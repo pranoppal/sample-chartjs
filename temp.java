@@ -1,89 +1,72 @@
-<dependency>
-    <groupId>com.azure.spring</groupId>
-    <artifactId>azure-spring-boot-starter-active-directory</artifactId>
-    <version>4.6.0</version> <!-- or the latest -->
-</dependency>
-
-
-  import org.springframework.security.core.Authentication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.client.*;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
-import org.springframework.security.oauth2.core.*;
+import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
-import org.springframework.stereotype.Component;
-
-import javax.servlet.http.*;
-import java.io.IOException;
-
 import org.springframework.web.client.RestTemplate;
 import org.springframework.http.*;
 
-@Component
-public class GraphApiSuccessHandler implements AuthenticationSuccessHandler {
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.*;
+import java.io.IOException;
 
-    private final OAuth2AuthorizedClientService authorizedClientService;
-
-    public GraphApiSuccessHandler(OAuth2AuthorizedClientService authorizedClientService) {
-        this.authorizedClientService = authorizedClientService;
-    }
-
-    @Override
-    public void onAuthenticationSuccess(HttpServletRequest request,
-                                        HttpServletResponse response,
-                                        Authentication authentication) throws IOException {
-        if (authentication instanceof OAuth2AuthenticationToken) {
-            OAuth2AuthenticationToken oauthToken = (OAuth2AuthenticationToken) authentication;
-
+@Bean
+public AuthenticationSuccessHandler graphSuccessHandler(OAuth2AuthorizedClientService authorizedClientService) {
+    return (HttpServletRequest request, HttpServletResponse response, Authentication authentication) -> {
+        if (authentication instanceof OAuth2AuthenticationToken oauthToken) {
             OAuth2AuthorizedClient client = authorizedClientService.loadAuthorizedClient(
-                    oauthToken.getAuthorizedClientRegistrationId(),
-                    oauthToken.getName());
+                    oauthToken.getAuthorizedClientRegistrationId(), oauthToken.getName());
 
-            String accessToken = client.getAccessToken().getTokenValue();
+            if (client != null) {
+                OAuth2AccessToken accessToken = client.getAccessToken();
+                String tokenValue = accessToken.getTokenValue();
 
-            // Call Microsoft Graph
-            String url = "https://graph.microsoft.com/v1.0/me/memberOf?$select=id,displayName";
+                // Call Graph API
+                String url = "https://graph.microsoft.com/v1.0/me/memberOf?$select=id,displayName";
+                HttpHeaders headers = new HttpHeaders();
+                headers.setBearerAuth(tokenValue);
+                headers.setAccept(List.of(MediaType.APPLICATION_JSON));
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setBearerAuth(accessToken);
-            headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+                HttpEntity<Void> entity = new HttpEntity<>(headers);
+                RestTemplate restTemplate = new RestTemplate();
+                ResponseEntity<String> graphResponse = restTemplate.exchange(
+                        url, HttpMethod.GET, entity, String.class);
 
-            HttpEntity<Void> entity = new HttpEntity<>(headers);
-            RestTemplate restTemplate = new RestTemplate();
-            ResponseEntity<String> graphResponse = restTemplate.exchange(
-                    url, HttpMethod.GET, entity, String.class);
+                System.out.println("Graph response: " + graphResponse.getBody());
 
-            // Do something with the response (log/store/process it)
-            System.out.println("Graph Response: " + graphResponse.getBody());
+                // TODO: you can check if user is in a specific group here
+                // and redirect based on that
+            }
         }
 
-        // Redirect to home or where you want to land post-login
-        response.sendRedirect("/"); // or any path you want
-    }
+        // Redirect after success
+        response.sendRedirect("/");
+    };
 }
 
 
 
 
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
-public class SecurityConfig extends WebSecurityConfigurerAdapter {
+public class SecurityConfig {
 
-    @Autowired
-    private GraphApiSuccessHandler graphApiSuccessHandler;
-
-    @Override
-    protected void configure(HttpSecurity http) throws Exception {
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http,
+                                           AuthenticationSuccessHandler graphSuccessHandler) throws Exception {
         http
-            .authorizeRequests()
+            .authorizeHttpRequests(authz -> authz
                 .anyRequest().authenticated()
-            .and()
-            .oauth2Login()
-                .successHandler(graphApiSuccessHandler);
+            )
+            .oauth2Login(oauth -> oauth
+                .successHandler(graphSuccessHandler)
+            );
+
+        return http.build();
     }
 }
-
-  
