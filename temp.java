@@ -1,72 +1,85 @@
-import org.springframework.context.annotation.Bean;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.client.*;
-import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
-import org.springframework.security.oauth2.core.OAuth2AccessToken;
-import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.http.*;
+@Service
+public class GraphApiService {
 
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.*;
-import java.io.IOException;
+    private final RestTemplate restTemplate;
 
-@Bean
-public AuthenticationSuccessHandler graphSuccessHandler(OAuth2AuthorizedClientService authorizedClientService) {
-    return (HttpServletRequest request, HttpServletResponse response, Authentication authentication) -> {
-        if (authentication instanceof OAuth2AuthenticationToken oauthToken) {
-            OAuth2AuthorizedClient client = authorizedClientService.loadAuthorizedClient(
-                    oauthToken.getAuthorizedClientRegistrationId(), oauthToken.getName());
+    public GraphApiService(RestTemplateBuilder builder) {
+        this.restTemplate = builder.build();
+    }
 
-            if (client != null) {
-                OAuth2AccessToken accessToken = client.getAccessToken();
-                String tokenValue = accessToken.getTokenValue();
+    public List<String> fetchAppRoles(String accessToken) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(accessToken);
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
 
-                // Call Graph API
-                String url = "https://graph.microsoft.com/v1.0/me/memberOf?$select=id,displayName";
-                HttpHeaders headers = new HttpHeaders();
-                headers.setBearerAuth(tokenValue);
-                headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+        HttpEntity<Void> requestEntity = new HttpEntity<>(headers);
 
-                HttpEntity<Void> entity = new HttpEntity<>(headers);
-                RestTemplate restTemplate = new RestTemplate();
-                ResponseEntity<String> graphResponse = restTemplate.exchange(
-                        url, HttpMethod.GET, entity, String.class);
+        // You can change "me" to specific userId if needed
+        ResponseEntity<Map> response = restTemplate.exchange(
+            "https://graph.microsoft.com/v1.0/me/appRoleAssignments",
+            HttpMethod.GET,
+            requestEntity,
+            Map.class
+        );
 
-                System.out.println("Graph response: " + graphResponse.getBody());
+        List<String> roleIds = new ArrayList<>();
+        if (response.getStatusCode().is2xxSuccessful()) {
+            List<Map<String, Object>> assignments = (List<Map<String, Object>>) response.getBody().get("value");
 
-                // TODO: you can check if user is in a specific group here
-                // and redirect based on that
+            for (Map<String, Object> assignment : assignments) {
+                String roleId = (String) assignment.get("appRoleId");
+                roleIds.add(roleId); // You can also map to display names if needed
             }
         }
 
-        // Redirect after success
-        response.sendRedirect("/");
-    };
+        return roleIds;
+    }
 }
 
 
 
+@Override
+public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
 
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.web.SecurityFilterChain;
+    String requestURI = request.getRequestURI();
 
-@Configuration
-public class SecurityConfig {
+    if (requestURI.contains("/swagger") || requestURI.contains("/swagger-ui")) {
+        HttpSession session = request.getSession();
+        @SuppressWarnings("unchecked")
+        List<String> appRoles = (List<String>) session.getAttribute("appRoles");
 
-    @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http,
-                                           AuthenticationSuccessHandler graphSuccessHandler) throws Exception {
-        http
-            .authorizeHttpRequests(authz -> authz
-                .anyRequest().authenticated()
-            )
-            .oauth2Login(oauth -> oauth
-                .successHandler(graphSuccessHandler)
-            );
+        if (appRoles == null) {
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
-        return http.build();
+            if (authentication instanceof OAuth2AuthenticationToken oauthToken) {
+                String clientRegistrationId = oauthToken.getAuthorizedClientRegistrationId();
+
+                OAuth2AuthorizedClient authorizedClient =
+                        authorizedClientService.loadAuthorizedClient(
+                                clientRegistrationId,
+                                oauthToken.getName()
+                        );
+
+                if (authorizedClient != null && authorizedClient.getAccessToken() != null) {
+                    String accessToken = authorizedClient.getAccessToken().getTokenValue();
+                    appRoles = graphApiService.fetchAppRoles(accessToken);
+                    session.setAttribute("appRoles", appRoles);
+                } else {
+                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized");
+                    return false;
+                }
+            } else {
+                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Authentication required");
+                return false;
+            }
+        }
+
+        // Optional: check required role
+        if (!appRoles.contains("YOUR_EXPECTED_ROLE_ID_OR_NAME")) {
+            response.sendError(HttpServletResponse.SC_FORBIDDEN, "Access Denied");
+            return false;
+        }
     }
+
+    return true;
 }
