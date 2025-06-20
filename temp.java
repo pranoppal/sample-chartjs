@@ -1,45 +1,38 @@
-@Component
-public class CustomOAuth2UserService implements OAuth2UserService<OAuth2UserRequest, OAuth2User> {
+@Component("roleChecker")
+public class RoleChecker {
 
-    private final GraphApiService graphApiService;
+    private final SecurityProperties securityProperties;
 
-    public CustomOAuth2UserService(GraphApiService graphApiService) {
-        this.graphApiService = graphApiService;
+    public RoleChecker(SecurityProperties securityProperties) {
+        this.securityProperties = securityProperties;
     }
 
-    @Override
-    public OAuth2User loadUser(OAuth2UserRequest userRequest) throws OAuth2AuthenticationException {
-        OAuth2User oauth2User = new DefaultOAuth2UserService().loadUser(userRequest);
-
-        String accessToken = userRequest.getAccessToken().getTokenValue();
-        List<String> appRoles = graphApiService.fetchAppRoles(accessToken);
-
-        // Convert to Spring authorities
-        List<GrantedAuthority> authorities = appRoles.stream()
-            .map(role -> new SimpleGrantedAuthority("ROLE_" + role)) // or whatever prefix you use
-            .collect(Collectors.toList());
-
-        // Merge with existing authorities if needed
-        authorities.addAll(oauth2User.getAuthorities());
-
-        return new DefaultOAuth2User(
-            authorities,
-            oauth2User.getAttributes(),
-            "name" // or whatever is your username attribute
-        );
+    public boolean hasAppRole(Authentication authentication) {
+        String requiredRole = "ROLE_" + securityProperties.getApprole();
+        return authentication.getAuthorities().stream()
+            .anyMatch(auth -> auth.getAuthority().equals(requiredRole));
     }
 }
 
 
 
+@PreAuthorize("@roleChecker.hasAppRole(authentication)")
+@GetMapping("/api/secured")
+public ResponseEntity<String> securedEndpoint() {
+    return ResponseEntity.ok("Access granted");
+}
 
-@Bean
-public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-    http
-        .oauth2Login(oauth2 -> oauth2
-            .userInfoEndpoint(userInfo -> userInfo
-                .userService(customOAuth2UserService) // inject here
-            )
-        );
-    return http.build();
+
+@Component
+@ConfigurationProperties(prefix = "my.security")
+public class SecurityProperties {
+    private String approle;
+
+    public String getApprole() {
+        return approle;
+    }
+
+    public void setApprole(String approle) {
+        this.approle = approle;
+    }
 }
